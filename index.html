@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Satna–Nagod Pickup Service</title>
+<style>
+  :root { --brand:#1e9e5f; --ink:#171717; --muted:#6b7280; --bg:#f7f7f7; --card:#ffffff; --danger:#d90429; --warn:#f59e0b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Apple Color Emoji","Segoe UI Emoji"; color:var(--ink); background:var(--bg); }
+  .container { max-width:940px; margin:24px auto; padding:16px; }
+  .card { background:var(--card); border:1px solid #e5e7eb; border-radius:14px; padding:18px; box-shadow:0 4px 16px rgba(0,0,0,.05); }
+  .title { margin:0 0 8px; font-size:24px; font-weight:700; }
+  .row { display:grid; grid-template-columns:1fr; gap:12px; }
+  @media(min-width:720px){ .row-2 { grid-template-columns: 1fr 1fr; } }
+  label { font-weight:600; display:block; margin-bottom:6px; }
+  .input { width:100%; padding:12px 14px; border:1px solid #d1d5db; border-radius:12px; font-size:16px; outline:none; }
+  .input:focus { border-color:#9ca3af; box-shadow:0 0 0 3px rgba(30,158,95,.15); }
+  .btn { display:inline-flex; align-items:center; gap:8px; padding:11px 14px; border:none; border-radius:12px; background:var(--brand); color:#fff; font-weight:600; cursor:pointer; }
+  .btn.secondary { background:#111827; }
+  .btn.link { background:transparent; color:var(--brand); padding:0; }
+  .btn:disabled { opacity:.6; cursor:not-allowed; }
+  .note { padding:10px 12px; border-left:4px solid var(--brand); background:#ecfdf5; border-radius:10px; }
+  .muted { color:var(--muted); font-size:14px; }
+  .tag { display:inline-block; padding:6px 10px; border-radius:999px; background:#eef2ff; font-size:12px; font-weight:700; color:#3730a3; }
+  .alert { padding:12px 14px; border-radius:12px; }
+  .alert.ok { background:#ecfdf5; border:1px solid #86efac; color:#14532d; }
+  .alert.warn { background:#fff7ed; border:1px solid #fdba74; color:#7c2d12; }
+  .alert.err { background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; }
+  .hr { height:1px; background:#e5e7eb; margin:16px 0; }
+  .right { text-align:right; }
+  .small { font-size:12px; }
+  .pill { padding:6px 10px; border-radius:10px; background:#f3f4f6; }
+  .inline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .linkish { color:#2563eb; text-decoration:underline; cursor:pointer; }
+  .kbd { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,"Liberation Mono","Courier New", monospace; background:#111827; color:#fff; border-radius:8px; padding:2px 6px; font-size:12px; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1 class="title">Satna–Nagod Pickup Service <span class="tag">Live</span></h1>
+      <div class="note">
+        <div><b>Current Route:</b> Satna → Nagod</div>
+        <div><b>Distance (approx):</b> 30 km</div>
+        <div><b>Note:</b> हम केवल इसी कॉरिडोर (Satna–Nagod) के आस-पास के ऑर्डर स्वीकार करते हैं।</div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row row-2">
+        <div>
+          <label>Pickup Location</label>
+          <input id="pickup" class="input" placeholder="Type address, landmark or paste coordinates..." />
+          <div class="inline">
+            <button id="btnPick" class="btn">Use Current Location</button>
+            <button id="btnPickFind" class="btn secondary">Search Address</button>
+            <span id="pickStatus" class="muted"></span>
+          </div>
+          <div class="muted small" id="pickCoords"></div>
+        </div>
+
+        <div>
+          <label>Drop-off Location</label>
+          <input id="drop" class="input" placeholder="Type address, landmark or paste coordinates..." />
+          <div class="inline">
+            <button id="btnDrop" class="btn">Use Current Location</button>
+            <button id="btnDropFind" class="btn secondary">Search Address</button>
+            <span id="dropStatus" class="muted"></span>
+          </div>
+          <div class="muted small" id="dropCoords"></div>
+        </div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row">
+        <div class="inline">
+          <button id="btnCheck" class="btn">Check Service Eligibility</button>
+          <button id="btnSwap" class="btn link" title="Swap pickup & drop">↔️ Swap</button>
+        </div>
+        <div id="result" class="alert warn" style="display:none;"></div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="small muted">
+        Tips: अगर आपको exact address न मिले तो landmark लिखें या coordinates जैसे <span class="kbd">24.58, 80.83</span> पेस्ट कर दें।  
+        Online geocoding OpenStreetMap Nominatim से किया जा रहा है।
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // --- Satna & Nagod approx coordinates ---
+  const SATNA  = { lat: 24.5775, lon: 80.8272 };
+  const NAGOD  = { lat: 24.5686, lon: 80.5990 };
+
+  // Corridor tolerance (km) — within this buffer from the Satna–Nagod line we accept
+  const CORRIDOR_KM = 6; // ~6 km buffer each side
+
+  // DOM refs
+  const el = (id) => document.getElementById(id);
+  const pickupInput = el('pickup');
+  const dropInput   = el('drop');
+  const pickStatus  = el('pickStatus');
+  const dropStatus  = el('dropStatus');
+  const pickCoords  = el('pickCoords');
+  const dropCoords  = el('dropCoords');
+  const resultBox   = el('result');
+
+  const btnPick = el('btnPick');
+  const btnDrop = el('btnDrop');
+  const btnPickFind = el('btnPickFind');
+  const btnDropFind = el('btnDropFind');
+  const btnCheck = el('btnCheck');
+  const btnSwap  = el('btnSwap');
+
+  // State
+  let pickupPoint = null;
+  let dropPoint   = null;
+
+  // Utils
+  function toast(elm, msg){ elm.textContent = msg; }
+  function showResult(type, html){
+    resultBox.className = 'alert ' + (type==='ok' ? 'ok' : type==='err' ? 'err' : 'warn');
+    resultBox.innerHTML = html;
+    resultBox.style.display = 'block';
+  }
+  function hideResult(){ resultBox.style.display = 'none'; }
+
+  function parseLatLon(text){
+    // Accept "lat, lon"
+    const m = String(text).trim().match(/^\s*(-?\d+(\.\d+)?)\s*,\s*(-?\d+(\.\d+)?)\s*$/);
+    if(!m) return null;
+    return { lat: parseFloat(m[1]), lon: parseFloat(m[3]) };
+  }
+
+  // Haversine distance (km)
+  function haversine(a, b){
+    const R = 6371;
+    const dLat = (b.lat-a.lat)*Math.PI/180;
+    const dLon = (b.lon-a.lon)*Math.PI/180;
+    const lat1 = a.lat*Math.PI/180, lat2=b.lat*Math.PI/180;
+    const h = Math.sin(dLat/2)**2 + Math.sin(dLon/2)**2 * Math.cos(lat1) * Math.cos(lat2);
+    return 2*R*Math.asin(Math.sqrt(h));
+  }
+
+  // Distance from point P to line segment AB (km)
+  function distanceToSegment(p, a, b){
+    function toRad(x){ return x*Math.PI/180; }
+    // Quick planar approximation using meters (works fine for short distances)
+    const R = 6371000;
+    function latLonToXY(c){
+      const x = toRad(c.lon) * Math.cos(toRad((a.lat+b.lat)/2)) * R;
+      const y = toRad(c.lat) * R;
+      return {x,y};
+    }
+    const P=latLonToXY(p), A=latLonToXY(a), B=latLonToXY(b);
+    const APx=P.x-A.x, APy=P.y-A.y;
+    const ABx=B.x-A.x, ABy=B.y-A.y;
+    const ab2=ABx*ABx + ABy*ABy;
+    let t = ab2===0 ? 0 : (APx*ABx + APy*ABy)/ab2;
+    t = Math.max(0, Math.min(1, t));
+    const proj = { x: A.x + t*ABx, y: A.y + t*ABy };
+    const dx = P.x - proj.x, dy = P.y - proj.y;
+    return Math.sqrt(dx*dx + dy*dy) / 1000; // km
+  }
+
+  // Check if a point is inside Satna–Nagod corridor
+  function inCorridor(pt){
+    const d = distanceToSegment(pt, SATNA, NAGOD);
+    const along = haversine(SATNA, pt) + haversine(pt, NAGOD) - haversine(SATNA, NAGOD);
+    // allow little past the endpoints (3 km) & within side buffer
+    return d <= CORRIDOR_KM && Math.abs(along) < 6;
+  }
+
+  // Geolocation
+  async function getCurrent(){
+    return new Promise((resolve, reject) => {
+      if(!('geolocation' in navigator)) return reject(new Error('Geolocation not supported'));
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        (err) => reject(err),
+        { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+      );
+    });
+  }
+
+  // Reverse geocode with OpenStreetMap Nominatim
+  async function reverseGeocode(lat, lon){
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&zoom=16&addressdetails=1`;
+    const r = await fetch(url, { headers: { 'Accept':'application/json' }});
+    if(!r.ok) throw new Error('Reverse geocoding failed');
+    const j = await r.json();
+    return j.display_name || `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+  }
+
+  // Forward geocode (query → lat/lon)
+  async function geocode(query){
+    // If user pasted coordinates, accept directly
+    const parsed = parseLatLon(query);
+    if(parsed) return { ...parsed, label: `${parsed.lat}, ${parsed.lon}` };
+
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&q=${encodeURIComponent(query)}&limit=1`;
+    const r = await fetch(url, { headers: { 'Accept':'application/json' }});
+    if(!r.ok) throw new Error('Search failed');
+    const arr = await r.json();
+    if(!arr.length) throw new Error('Address not found');
+    const hit = arr[0];
+    return { lat: parseFloat(hit.lat), lon: parseFloat(hit.lon), label: hit.display_name };
+  }
+
+  function setPickup(pt, label){
+    pickupPoint = { lat: pt.lat, lon: pt.lon };
+    pickupInput.value = label;
+    pickCoords.textContent = `Lat: ${pt.lat.toFixed(6)}, Lon: ${pt.lon.toFixed(6)}`;
+  }
+  function setDrop(pt, label){
+    dropPoint = { lat: pt.lat, lon: pt.lon };
+    dropInput.value = label;
+    dropCoords.textContent = `Lat: ${pt.lat.toFixed(6)}, Lon: ${pt.lon.toFixed(6)}`;
+  }
+
+  // Button handlers
+  btnPick.addEventListener('click', async () => {
+    hideResult();
+    toast(pickStatus, 'Fetching GPS… allow permission');
+    btnPick.disabled = true;
+    try{
+      const pos = await getCurrent();
+      const addr = await reverseGeocode(pos.lat, pos.lon);
+      setPickup(pos, addr);
+      toast(pickStatus, '✓ Location set');
+    }catch(e){
+      toast(pickStatus, 'Could not get location. Tip: Turn ON GPS & give permission.');
+      showResult('err', `Pickup location error: ${e.message}`);
+    }finally{ btnPick.disabled = false; }
+  });
+
+  btnDrop.addEventListener('click', async () => {
+    hideResult();
+    toast(dropStatus, 'Fetching GPS… allow permission');
+    btnDrop.disabled = true;
+    try{
+      const pos = await getCurrent();
+      const addr = await reverseGeocode(pos.lat, pos.lon);
+      setDrop(pos, addr);
+      toast(dropStatus, '✓ Location set');
+    }catch(e){
+      toast(dropStatus, 'Could not get location. Tip: Turn ON GPS & give permission.');
+      showResult('err', `Drop location error: ${e.message}`);
+    }finally{ btnDrop.disabled = false; }
+  });
+
+  btnPickFind.addEventListener('click', async () => {
+    hideResult();
+    const q = pickupInput.value.trim();
+    if(!q){ showResult('warn','Please type an address or coordinates for Pickup.'); return; }
+    btnPickFind.disabled = true; toast(pickStatus, 'Searching…');
+    try{
+      const pt = await geocode(q);
+      setPickup(pt, pt.label);
+      toast(pickStatus, '✓ Found');
+    }catch(e){
+      showResult('err', `Pickup search error: ${e.message}`);
+      toast(pickStatus,'');
+    }finally{ btnPickFind.disabled=false; }
+  });
+
+  btnDropFind.addEventListener('click', async () => {
+    hideResult();
+    const q = dropInput.value.trim();
+    if(!q){ showResult('warn','Please type an address or coordinates for Drop-off.'); return; }
+    btnDropFind.disabled = true; toast(dropStatus, 'Searching…');
+    try{
+      const pt = await geocode(q);
+      setDrop(pt, pt.label);
+      toast(dropStatus, '✓ Found');
+    }catch(e){
+      showResult('err', `Drop search error: ${e.message}`);
+      toast(dropStatus,'');
+    }finally{ btnDropFind.disabled=false; }
+  });
+
+  btnSwap.addEventListener('click', () => {
+    hideResult();
+    const A = { value: pickupInput.value, point: pickupPoint, coords: pickCoords.textContent };
+    pickupInput.value = dropInput.value;
+    pickCoords.textContent = dropCoords.textContent;
+    pickupPoint = dropPoint;
+    dropInput.value = A.value;
+    dropCoords.textContent = A.coords;
+    dropPoint = A.point;
+  });
+
+  btnCheck.addEventListener('click', async () => {
+    hideResult();
+    try{
+      // If user typed fresh & didn't click Search, try to parse/geocode silently
+      if(!pickupPoint && pickupInput.value.trim()){
+        const pt = await geocode(pickupInput.value.trim());
+        setPickup(pt, pt.label);
+      }
+      if(!dropPoint && dropInput.value.trim()){
+        const pt = await geocode(dropInput.value.trim());
+        setDrop(pt, pt.label);
+      }
+      if(!pickupPoint || !dropPoint){
+        showResult('warn','Please set both Pickup and Drop-off locations first.');
+        return;
+      }
+      const dTrip = haversine(pickupPoint, dropPoint).toFixed(1);
+      const pIn = inCorridor(pickupPoint);
+      const dIn = inCorridor(dropPoint);
+      const pSide = distanceToSegment(pickupPoint, SATNA, NAGOD).toFixed(2);
+      const dSide = distanceToSegment(dropPoint, SATNA, NAGOD).toFixed(2);
+
+      if(pIn && dIn){
+        showResult('ok', `
+          ✅ <b>Good news!</b> आपका ऑर्डर Satna–Nagod कॉरिडोर के अंदर है।<br/>
+          <div class="pill">Trip distance (straight-line): ~ <b>${dTrip} km</b></div>
+          <div class="small muted">Pickup corridor offset: ${pSide} km, Drop corridor offset: ${dSide} km (limit ${CORRIDOR_KM} km)</div>
+        `);
+      }else{
+        let why = [];
+        if(!pIn) why.push(`Pickup corridor से ${pSide} km दूर`);
+        if(!dIn) why.push(`Drop-off corridor से ${dSide} km दूर`);
+        showResult('warn', `
+          ⚠️ <b>Outside service corridor.</b><br/>
+          कारण: ${why.join(' • ')}.<br/>
+          कृपया Satna–Nagod रूट के नज़दीक कोई लोकेशन चुनें।
+        `);
+      }
+    }catch(e){
+      showResult('err', `Check failed: ${e.message}`);
+    }
+  });
+
+  // Pre-fill helpful placeholders (optional)
+  pickupInput.placeholder = "e.g., Satna Junction, Civil Lines, 24.58, 80.83";
+  dropInput.placeholder   = "e.g., Nagod Bus Stand, 24.57, 80.60";
+})();
+</script>
+</body>
+</html>
